@@ -1,0 +1,369 @@
+---
+title: "Case Study: Cyclistic Bike-Share"
+subtitle: "How casual riders and annual members differ"
+author: "Bernhard Serapins"
+date: '`r Sys.Date()`'
+output: 
+  html_document:
+    toc: true
+    code_folding: hide
+    theme : paper
+---
+
+This case study was completed by myself (Bernhard Serapins) as part of the Capstone project in the Google Data Analytics Professional Certificate on Coursera.  
+
+From the visualization section onwards, I have opted for the code chunks to be hidden by default. This is done to put emphasis on the visualizations. The code chunks can however be shown at any time using the code dropdown box at the top right of the report or at the top right of each visualization to unhide them individually.
+
+# Problem statement
+
+How do annual members and casual riders use Cyclistic bikes differently? Insights gained by answering this question will be used to make recommendations for a new marketing strategy, the purpose of which will be to convert customers from casual users into annual members.
+
+# Datasources
+
+The data used in this case study is publicly available here:   
+https://divvy-tripdata.s3.amazonaws.com/index.html
+
+The data is used under the terms of a data licence agreement, the terms of which can be viewed here:   
+https://ride.divvybikes.com/data-license-agreement
+
+I used trip data for the period spanning September 2021 to August 2022. We can be fairly sure that there is a high level of data integrity as the data is provided directly by Bikeshare for the City of Chicago. The data was integral in answering the question posed in the problem statement, as it provided a lot of information relevant to the case study once it was analyzed.
+
+# Setting up packages and libraries
+
+```{r echo=T, results='hide', message = FALSE, warning = FALSE, class.source = 'fold-show'}
+library(tidyverse)
+library(janitor)
+```
+
+# Importing and merging csv documents
+
+The data consists of 12 csv files. Each one representing a month of trip data. The following code will merge all 12 files into a single data frame.
+
+```{r echo=T, results='hide', message = FALSE, warning = FALSE, class.source = 'fold-show'}
+divvy_df <- list.files(path="../input/divvytripdata", full.names = TRUE) %>%  
+  lapply(read_csv) %>% 
+  bind_rows
+```
+
+# Cleaning the data
+
+For this case study, I was able to use R for all the steps in the analysis. R is very capable of performing the tasks of cleaning, analyzing, and visualizating the data, and can do so with a very large dataset.
+
+The member_casual column is renamed to customer_type as it represents a more descriptive name for the column.
+
+```{r echo=T, results='hide', message = FALSE, warning = FALSE, class.source = 'fold-show'}
+divvy_df <- divvy_df %>% 
+  rename(customer_type = member_casual)
+```
+
+The clean_names() function is used to ensure that all columns follow the same naming standard.
+
+```{r echo=T, results='hide', message = FALSE, warning = FALSE, class.source = 'fold-show'}
+divvy_df <- clean_names(divvy_df)
+```
+
+We won't be using any longitudinal and latitudinal data in our analysis so we can remove them from the data frame.
+
+```{r echo=T, results='hide', message = FALSE, warning = FALSE, class.source = 'fold-show'}
+divvy_df <- divvy_df[,!names(divvy_df) %in% c("start_lat", "start_lng", "end_lat", "end_lng")]
+```
+
+# Processing data
+
+A new column called trip_time is created. The trip time is calculated by subtracting start time (started_at) from the end time (ended_at).
+
+```{r echo=T, results='hide', message = FALSE, warning = FALSE, class.source = 'fold-show'}
+divvy_df$trip_time <- divvy_df$ended_at - divvy_df$started_at
+
+library(lubridate)
+
+divvy_df <- divvy_df %>% 
+  mutate(trip_time = seconds_to_period(trip_time))
+```
+
+Another column is created for the route, which is the end station name appended to the start station name.
+
+```{r echo=T, results='hide', message = FALSE, warning = FALSE, class.source = 'fold-show'}
+divvy_df$route <- paste0(divvy_df$start_station_name, " to ", divvy_df$end_station_name)
+```
+
+Rows consisting of a trip time of 0 seconds are removed.
+
+```{r echo=T, results='hide', message = FALSE, warning = FALSE, class.source = 'fold-show'}
+divvy_df <- divvy_df[divvy_df$trip_time!=0,]
+```
+
+Two additional columns are created. One to show the weekday and another column to show the day of week. For example; Monday=1, Tuesday=2, etc.
+
+```{r echo=T, results='hide', message = FALSE, warning = FALSE, class.source = 'fold-show'}
+
+divvy_df$week_day <- wday(divvy_df$started_at, label=TRUE)
+
+divvy_df$day_of_week <- wday(ymd_hms(divvy_df$started_at), week_start=1)
+```
+
+# Analysis of the data
+
+The following data frames are all used later in the visualizations. First we creater a data frame object that will host the mean, median, minimum, and maximum trip time. These are calculated in seconds so they get converted back to hours:minutes:seconds.
+
+```{r class.source = 'fold-show'}
+trip_time_summary_df <- 
+  divvy_df %>%
+  group_by(customer_type) %>%
+  summarise(average_trip_time=round(mean(as.numeric(trip_time)), digits = 0),
+            median_trip_time=median(as.numeric(trip_time)),
+            min_trip_time=min(as.numeric(trip_time)),
+            max_trip_time=max(as.numeric(trip_time)))
+
+trip_time_summary_df <- trip_time_summary_df %>% 
+  mutate(average_trip_time = seconds_to_period(average_trip_time),
+         median_trip_time=seconds_to_period(median_trip_time),
+         min_trip_time=seconds_to_period(min_trip_time),
+         max_trip_time=seconds_to_period(max_trip_time))
+
+```
+
+Some additional data frames are created that rank the start stations from most popular to least popular for both casual riders and Cyclistic members.
+
+```{r echo=T, results='hide', message = FALSE, warning = FALSE, class.source = 'fold-show'}
+popular_start_stations_df <- divvy_df %>%
+  group_by(start_station_name, customer_type) %>% 
+  summarize(trip_start_count = n())
+
+popular_start_stations_df <- na.omit(popular_start_stations_df)
+popular_start_stations_df <- popular_start_stations_df[order(-popular_start_stations_df$trip_start_count),]
+
+popular_member_start_stations_df <- popular_start_stations_df %>% 
+  filter(customer_type == "member")
+popular_member_start_stations_df <- popular_member_start_stations_df[1:5,]
+
+popular_casual_start_stations_df <- popular_start_stations_df %>% 
+  filter(customer_type == "casual")
+popular_casual_start_stations_df <- popular_casual_start_stations_df[1:5,]
+```
+
+Data frame object are also created to rank end stations from most popular to least popular for both customer types.
+
+```{r echo=T, results='hide', message = FALSE, warning = FALSE, class.source = 'fold-show'}
+popular_end_stations_df <- divvy_df %>%
+  group_by(end_station_name, customer_type) %>% 
+  summarize(trip_end_count = n())
+
+popular_end_stations_df <- na.omit(popular_end_stations_df)
+popular_end_stations_df <- popular_end_stations_df[order(-popular_end_stations_df$trip_end_count),]
+
+popular_member_end_stations_df <- popular_end_stations_df %>% 
+  filter(customer_type == "member")
+popular_member_end_stations_df <- popular_member_end_stations_df[1:5,]
+
+popular_casual_end_stations_df <- popular_end_stations_df %>% 
+  filter(customer_type == "casual")
+popular_casual_end_stations_df <- popular_casual_end_stations_df[1:5,]
+```
+
+By concatenating the start and end stations on a single trip we can store the route for that trip in a dataframe.
+
+```{r echo=T, results='hide', message = FALSE, warning = FALSE, class.source = 'fold-show'}
+popular_routes_df <- divvy_df %>%
+  group_by(route, customer_type) %>% 
+  summarize(customers_on_route = n())
+  
+popular_routes_df <- popular_routes_df %>% filter(route != "NA to NA")
+popular_routes_df <- popular_routes_df[order(-popular_routes_df$customers_on_route),]
+
+popular_member_routes_df <- popular_routes_df %>% 
+  filter(customer_type == "member")
+popular_member_routes_df <- popular_member_routes_df[1:5,]
+
+popular_casual_routes_df <- popular_routes_df %>% 
+  filter(customer_type == "casual")
+popular_casual_routes_df <- popular_casual_routes_df[1:5,]
+```
+
+# Visualization of the data
+
+The chart below indicates what the average trip duration is of Cyclistic members vs casual users that are not members.
+
+```{r}
+ggplot(trip_time_summary_df, aes(x = customer_type,
+                                y = period_to_seconds(average_trip_time),
+                                width = 0.65)) +
+  geom_col(fill = "#0099f9") +
+  geom_text(aes(label = average_trip_time), size = 4, vjust = 2, color = "#ffffff") +  
+  theme_classic() +
+  ggtitle("Average trip time by customer type")+
+  labs(x = "Customer type",
+       y = "Trip duration (seconds)") +
+  theme_classic() + theme(axis.title = element_text(face = "bold"))
+```
+
+The following chart groups the average ride length by bicycle type and by customer type.
+
+```{r fig.height = 6, fig.width = 10}
+ggplot(data = divvy_df, mapping = aes(x = rideable_type, 
+                                      y=period_to_seconds(trip_time))) +
+  geom_bar(stat = "summary", 
+           fun = mean,
+           fill = "#69c6ff") +
+  geom_text(stat = "summary", fun = "mean",
+            aes(label = seconds_to_period(round(after_stat(y), digits = 0))), vjust = 2) +
+  theme_classic() +
+  facet_wrap(~customer_type) +
+  ggtitle("Average trip time of each bicycle type across customer type") +
+  labs(x = "Bicycle type",
+       y = "trip duration (seconds)") +
+  theme_classic() + theme(axis.title = element_text(face = "bold"))
+```
+
+The next chart shows what type of bicycle is the most popular mode of transportation and splits each one of those up between members and casual users.
+
+```{r fig.height = 6, fig.width = 10}
+ggplot(divvy_df, aes(x = rideable_type)) +
+  geom_bar(fill="#0099f9") +
+  geom_text(aes(label = ..count..), stat = "count", color = "#ffffff", vjust = 2, size = 4) +
+  theme_classic() +
+  facet_wrap(~customer_type) +
+  ggtitle("Number of trips per bicycle type across customer type") +
+  labs(x = "Bicycle type",
+       y = "Count of times bicycles were used") +
+  theme_classic() + theme(axis.title = element_text(face = "bold"))
+```
+
+The next chart shows the total number of trips taken by members vs non-members in a year.
+
+```{r}
+ggplot(divvy_df, aes(x = customer_type)) +
+  geom_bar(fill = "#69c6ff", width = 0.65) +
+  geom_text(aes(label = ..count..), stat = "count", vjust = 2) +
+  theme_classic() +
+  ggtitle("Trips taken by members vs non-members (Sep 2021 - Aug 2022)")+
+  labs(x = "Customer type",
+       y = "Count (number of trips)")+
+  theme_classic() + theme(axis.title = element_text(face = "bold"))
+```
+
+The chart below shows the total number of trips taken each month over the course of a year for both members and non-members.
+
+```{r fig.height = 6, fig.width = 10}
+ggplot(divvy_df, aes(x = month(started_at, label = TRUE),
+                     fill = customer_type)) +
+  geom_bar(position = position_dodge(width = 0.9)) +
+  theme_classic() +
+  ggtitle("Total number of trips taken by members vs non-members each month (Sep 2021 - Aug 2022)")+
+  labs(x = "Month",
+       y = "Count (number of trips)")+
+  theme_classic() + theme(axis.title = element_text(face = "bold"))
+```
+
+The following chart shows the total number of trips taken per weekday in a year and is split between members and non-members.
+
+```{r}
+ggplot(divvy_df, aes(x = week_day, fill = customer_type)) +
+  geom_bar(position = position_dodge(width = 0.5)) +
+  theme_classic() +
+  ggtitle("Total number of trips taken per weekday in a year (Sep 2021 - Aug 2022)") +
+  labs(x = "Weekday",
+       y = "Count (number of trips)") +
+  theme_classic() + theme(axis.title = element_text(face = "bold"))
+```
+
+The following chart visualizes the start stations that are most frequented by members and casual riders
+
+```{r fig.height = 6, fig.width = 13}
+ggplot(popular_member_start_stations_df, aes(x = reorder(start_station_name, +trip_start_count), 
+                                     y = trip_start_count)) +
+  geom_col(fill = "#0099f9") +
+  theme_classic() +
+  geom_text(aes(label = trip_start_count), size = 4, hjust = 2, vjust = 0.5, color = "#ffffff") + 
+  ggtitle("5 most popular start stations for Cyclistic members (Sep 2021 - Aug 2022)") +
+  labs(x = "Start station name",
+       y = "Count (number of trips)") +
+  coord_flip() +
+  theme_classic() + theme(axis.title = element_text(face = "bold"), axis.text = element_text(size = 10))
+
+ggplot(popular_casual_start_stations_df, aes(x = reorder(start_station_name, +trip_start_count), 
+                                     y = trip_start_count)) +
+  geom_col(fill = "#69c6ff") +
+  theme_classic() +
+  geom_text(aes(label = trip_start_count), size = 4, hjust = 2, vjust = 0.5) + 
+  ggtitle("5 most popular start stations for Casual Cyclistic customers (Sep 2021 - Aug 2022)") +
+  labs(x = "Start station name",
+       y = "Count (number of trips)") +
+  coord_flip() +
+  theme_classic() + theme(axis.title = element_text(face = "bold"), axis.text = element_text(size = 10))
+
+```
+
+The next two charts visualize the most popular end stations for both members and casual riders.
+
+```{r fig.height = 6, fig.width = 13}
+ggplot(popular_member_end_stations_df, aes(x = reorder(end_station_name, +trip_end_count), 
+                                     y = trip_end_count)) +
+  geom_col(fill = "#0099f9") +
+  theme_classic() +
+  geom_text(aes(label = trip_end_count), size = 4, hjust = 2, vjust = 0.5, color = "#ffffff") + 
+  ggtitle("5 most popular end stations for Cyclistic members (Sep 2021 - Aug 2022)") +
+  labs(x = "End station name",
+       y = "Count (number of trips)") +
+  coord_flip() +
+  theme_classic() + theme(axis.title = element_text(face = "bold"), axis.text = element_text(size = 10))
+
+ggplot(popular_casual_end_stations_df, aes(x = reorder(end_station_name, +trip_end_count), 
+                                     y = trip_end_count)) +
+  geom_col(fill = "#69c6ff") +
+  theme_classic() +
+  geom_text(aes(label = trip_end_count), size = 4, hjust = 2, vjust = 0.5) + 
+  ggtitle("5 most popular end stations for Casual Cyclistic customers (Sep 2021 - Aug 2022)") +
+  labs(x = "End station name",
+       y = "Count (number of trips)") +
+  coord_flip() +
+  theme_classic() + theme(axis.title = element_text(face = "bold"), axis.text = element_text(size = 10))
+```
+
+The charts below show the most popular routes for Cyclistic members as well as casual riders
+
+```{r fig.height = 6, fig.width = 13}
+ggplot(popular_member_routes_df, aes(x = reorder(route, +customers_on_route), 
+                                     y = customers_on_route)) +
+  geom_col(fill = "#0099f9") +
+  theme_classic() +
+  geom_text(aes(label = customers_on_route), size = 4, hjust = 2, vjust = 0.5, color = "#ffffff") + 
+  ggtitle("5 most popular routes for Cyclistic members (Sep 2021 - Aug 2022)") +
+  labs(x = "Routes",
+       y = "Count (number of trips)") +
+  coord_flip() +
+  theme_classic() + theme(axis.title = element_text(face = "bold"), axis.text = element_text(size = 10))
+
+ggplot(popular_casual_routes_df, aes(x = reorder(route, +customers_on_route), y = customers_on_route)) +
+  geom_col(fill = "#69c6ff") +
+  theme_classic() +
+  geom_text(aes(label = customers_on_route), size = 4, hjust = 2, vjust = 0.5) +
+  ggtitle("5 most popular routes for casual Cyclistic customers (Sep 2021 - Aug 2022)") +
+  labs(x = "Routes",
+       y = "Count (number of trips)") +
+  coord_flip() +
+  theme_classic() + theme(axis.title = element_text(face = "bold"), axis.text = element_text(size = 10))
+
+```
+
+# Results of the analysis
+
+Between the period of September 2021 and August 2022 casual users (non-members) of Cyclistic bikes spend more time on a trip than members. Casual users also spend more time on each of the different types of bicycles. This includes classic, docked, and electric bikes. This can possibly be attributed to casual users using the bicycles for recreational purposes, while members often use the bicycles for their daily commute to work.
+
+Members of Cyclistic have made more trips than casual users on electric and classic bikes. Casual users are however the only users of docked bikes. Overall, the total number of trips is higher for members than it is for non-members. This makes sense if the bicycles are used for commuting, as the members would use them more often to get to work. When the trip data is broken down into months, we can see that the total number of trips each month is still higher for members than casual users. During June and July, the total number of trips made by casual users is closer to the total number of trips made by members than in other months, when there is a larger difference between customer types. This difference can be attributed to the warmer summer weather, which would make it more pleasant for casual users who are using the bicycles for recreation.
+
+If we look at trip data on a weekly level, we can see that on a Monday to Friday, members make more trips than casual users. Saturday and Sunday, however, more trips are made by casual users than members. Once again, this falls in line with the theory that casual users are using the bicycles for recreational purposes.
+
+The most popular start station and end station for members is on Kingsbury St & Kinzie St. For casual users, Streeter Dr & Grand Ave is the most popular start and end station. There is a large difference between the most popular and second most popular start stations for casual users.
+
+The most popular route for members is Ellis Ave & 60th St to University Ave & 57th St. For casual users, the most popular route begins and ends at Streeter Dr & Grand Ave. Streeter Dr & Grand Ave is a popular destination as it is the location of several recreational activities on the Chicago Navy Pier such as the Centennial Wheel and the Chicago Children’s Museum. In fact, all the top 5 most popular routes for casual users are fairly close to one another. 
+
+# Recommendations and conclusions
+
+Since casual users spend more time on all categories of bicycles, it would make sense to have an advertising campaign that focuses on the fact that it is cheaper to have a membership, since the cost per minute on Divvy bikes is more expensive for casual users.
+
+More marketing campaigns should be run during the summer months, as the data shows that is when casual users are more likely to be using the bike-share system. The number of sign-up offers and marketing efforts should also be increased on weekends, as the number of casual users is at its highest during that part of the week.
+
+Marketing efforts should also focus on the fact that the bicycles can be used not only for recreational purposes, but also for user's daily commute. This can bring awareness to that benefit for casual users, which they may not have been aware of before.
+
+A good location to increase the intensity of marketing efforts would be around Streeter Dr & Grand Ave as well as parts of DuSable Lake Shore Dr, as these are the locations of the most popular routes for casual users of Cyclistic bicycles.
